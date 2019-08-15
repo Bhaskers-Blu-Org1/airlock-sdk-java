@@ -1,0 +1,282 @@
+import java.util.concurrent.TimeUnit
+import proguard.gradle.ProGuardTask
+apply plugin: 'idea'
+apply plugin: 'java'
+apply plugin: "jacoco"
+
+//This will force the tests to always execute by clearing out the test cache
+test.dependsOn 'cleanTest'
+
+
+idea {
+    module {
+        inheritOutputDirs = false
+        outputDir = file("$buildDir/classes/java/main/")
+        testOutputDir = file("$buildDir/classes/java/test/")
+    }
+}
+
+buildscript {
+    repositories {
+        mavenCentral()
+        jcenter()
+        google()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:3.0.1'
+        classpath 'org.jfrog.buildinfo:build-info-extractor-gradle:4.6.2'
+        classpath 'net.sf.proguard:proguard-gradle:5.2.1'
+        // NOTE: Do not place your application dependencies here; they belong
+        // in the individual module build.gradle files
+    }
+}
+
+// get class dirs for project dependencies
+FileTree getJacocoClassDirs(List projects) {
+
+    println "buildDir=" + buildDir
+
+    def classDirs = fileTree(dir: "${buildDir}/classes/java/main", exclude: '**/R*.class')
+    classDirs += fileTree(dir: "${buildDir}/../airlock-sdk-common/build/classes/java/main", exclude: '**/R*.class')
+    //projects.each {
+    // def projBuildDir = project(it).buildDir
+
+    //}
+    return classDirs
+}
+
+// get source dirs for project dependencies
+FileCollection getJacocoSrcDirs(List projects) {
+    Set srcDirs = sourceSets.main.java.srcDirs
+    projects.each {
+        def projDir = project(it).projectDir
+        srcDirs.add("${projDir}/src/main/java") // assume that android main sourceSets is here
+    }
+
+    println "srcDirs=" + srcDirs
+    return files(srcDirs)
+}
+
+
+jacocoTestReport {
+    group = "Reporting"
+    reports {
+        xml.enabled true
+        html.enabled true
+        csv.enabled false
+        html.destination file("${buildDir}/reports/coverage")
+    }
+
+    def dependencies = [':airlock-sdk-common'] // your gradle project dependencies go here
+    classDirectories = getJacocoClassDirs(dependencies)
+    sourceDirectories = getJacocoSrcDirs(dependencies)
+    executionData = files("${buildDir}/jacoco/test.exec")
+}
+
+
+allprojects {
+    apply plugin: 'com.jfrog.artifactory'
+    apply plugin: 'maven-publish'
+
+    repositories {
+        jcenter()
+        mavenCentral()
+    }
+}
+
+test {
+    ignoreFailures = true
+}
+
+sourceSets {
+    test {
+        resources.srcDir project(':airlock-sdk-common').file("src/main/java/com/ibm/airlock/common/test/data")
+    }
+}
+
+task copyTestResources(type: Copy) {
+
+    println("copyTestResources")
+    copy {
+        from "${projectDir}/airlock-sdk-common/src/main/java/com/ibm/airlock/common/test/data"
+        into "${buildDir}/classes/java/test"
+    }
+
+    copy {
+        from "${projectDir}/src/test/resources/com/ibm/airlock/sdk"
+        into "${buildDir}/classes/java/test/com/ibm/airlock/sdk"
+    }
+}
+
+testClasses.dependsOn copyTestResources
+
+task fatJar(type: Jar) {
+    manifest {
+        attributes 'Implementation-Title': 'Gradle Jar File Example',
+                'Implementation-Version': "1.0.0",
+                'Main-Class': 'com.mkyong.DateUtils'
+    }
+    baseName = "airlock-sdk-java"
+    from { configurations.compile.collect { it.isDirectory() ? it : zipTree(it) } }
+    with jar
+}
+
+build.dependsOn fatJar
+
+dependencies {
+    compile fileTree(dir: 'libs', include: ['*.jar'])
+    compileOnly 'com.google.code.gson:gson:2.8.0'
+    compileOnly 'com.squareup.okhttp3:okhttp:3.4.1'
+    compileOnly 'com.squareup.okhttp3:okhttp-urlconnection:3.4.1'
+    compileOnly 'org.json:json:20171018'
+    compileOnly 'commons-logging:commons-logging:1.2'
+    compileOnly 'org.mockito:mockito-core:1.9.5'
+    compileOnly 'junit:junit:4.12'
+    compileOnly 'org.jetbrains:annotations-java5:15.0'
+    compileOnly 'com.google.code.findbugs:annotations:2.0.3'
+    compile project(':airlock-sdk-common')
+    testCompile 'org.testng:testng:6.9.10'
+    testCompile 'org.mockito:mockito-core:1.9.5'
+    testCompile project(':airlock-sdk-common')
+    testCompile 'com.google.code.gson:gson:2.8.0'
+    testCompile 'com.squareup.okhttp3:okhttp:3.4.1'
+    testCompile 'com.squareup.okhttp3:okhttp-urlconnection:3.4.1'
+    testCompile 'org.json:json:20171018'
+    testCompile 'commons-logging:commons-logging:1.2'
+    testCompile 'org.mockito:mockito-core:1.9.5'
+    testCompile 'junit:junit:4.12'
+    testCompile 'org.jetbrains:annotations-java5:15.0'
+    testCompile 'com.google.code.findbugs:annotations:2.0.3'
+            'com.github.peterwippermann.junit4:parameterized-suite:1.1.0'
+}
+
+ext {
+    //change to false to publish a release build
+    SNAPSHOT = false
+
+    BUILD_NUMBER = System.getenv("BUILD_NUMBER") ?: devBuildNumber
+
+    VERSION_MAJOR_SDK = 2
+    VERSION_MINOR_SDK = 0
+    VERSION_MICRO_SDK = "$BUILD_NUMBER"
+    VERSION_EXTENSION_SDK = SNAPSHOT ? "-SNAPSHOT" : ""
+    VERSION_SDK = "$VERSION_MAJOR_SDK.$VERSION_MINOR_SDK.$VERSION_MICRO_SDK$VERSION_EXTENSION_SDK"
+
+    VERSION_MAJOR_COMMON = 5
+    VERSION_MINOR_COMMON = 0
+    VERSION_MICRO_COMMON = "$BUILD_NUMBER"
+    VERSION_EXTENSION_COMMON = SNAPSHOT ? "-SNAPSHOT" : ""
+    VERSION_COMMON = "$VERSION_MAJOR_COMMON.$VERSION_MINOR_COMMON.$VERSION_MICRO_COMMON$VERSION_EXTENSION_COMMON"
+    JAR_VERSION = "$VERSION_MAJOR_COMMON.$VERSION_MINOR_COMMON.$VERSION_MICRO_COMMON"
+
+    MVN_REPO_URL_BASE = artifactory_url
+    MVN_REPO_URL = getRepositoryUrl()
+    MVN_GROUP = "com.airlock"
+    MVN_ARTIFACT_ID = 'airlock'
+
+    MVN_USERNAME = artifactory_username
+    MVN_PASSWORD = artifactory_password
+}
+
+def getRepositoryUrl() {
+    if (!SNAPSHOT) {
+        return ext.MVN_REPO_URL_BASE + 'releases'
+    } else {
+        return ext.MVN_REPO_URL_BASE + 'snapshots'
+    }
+}
+
+/**
+ *  Run "./gradlew artifactoryPublish" to publish the artifacts
+ */
+
+artifactoryPublish.skip = true
+
+project('airlock-sdk-common') {
+    artifactoryPublish.dependsOn('build')
+    publishing {
+        publications {
+            jar(MavenPublication) {
+                groupId = MVN_GROUP
+                artifactId = MVN_ARTIFACT_ID + "-sdk-common"
+                version = VERSION_COMMON
+
+                artifact("$buildDir/libs/release/airlock-sdk-common-" + JAR_VERSION + ".jar")
+                pom.withXml {
+                    def dependencies = asNode().appendNode('dependencies')
+                    configurations.getByName("compile").getResolvedConfiguration().getFirstLevelModuleDependencies().each {
+                        def dependency = dependencies.appendNode('dependency')
+                        dependency.appendNode('groupId', it.moduleGroup)
+                        dependency.appendNode('artifactId', it.moduleName)
+                        dependency.appendNode('version', it.moduleVersion)
+                    }
+                }
+            }
+        }
+    }
+
+    artifactoryPublish {
+        publications(publishing.publications.jar)
+    }
+}
+
+task proguard(type: proguard.gradle.ProGuardTask) {
+    configuration 'airlock-java-sdk.pro'
+    libraryjars files(configurations.compileOnly.collect())
+    outputs.upToDateWhen { false }
+}
+
+
+publishing {
+    artifactoryPublish.dependsOn('generatePomFileForFatJarPublication')
+    publications {
+        fatJar(MavenPublication) {
+            groupId MVN_GROUP
+            version = VERSION_SDK
+            artifactId MVN_ARTIFACT_ID + "-java-slim"
+
+            // Tell maven to prepare the generated "*.jar" file for publishing
+            artifact("$buildDir/libs/airlock-sdk-java-shrinked.jar")
+        }
+    }
+}
+
+
+artifactoryPublish {
+    publications(publishing.publications.fatJar)
+}
+
+
+artifactory {
+    clientConfig.setIncludeEnvVars(true)
+    clientConfig.info.addEnvironmentProperty('test.adding.dynVar', new Date().toString())
+
+    contextUrl = MVN_REPO_URL_BASE
+    publish {
+        repository {
+            repoKey = artifactory_repo_key // The Artifactory repository key to publish to
+            username = MVN_USERNAME // The publisher user name
+            password = MVN_PASSWORD // The publisher password
+        }
+        defaults {
+            // Reference to Gradle publications defined in the build script.
+            // This is how we tell the Artifactory Plugin which artifacts should be
+            // published to Artifactory.
+            publications('fatJar')
+            publishArtifacts = true
+            // Properties to be attached to the published artifacts.
+            if (!SNAPSHOT) {
+                properties = ['release.type': 'release', 'team': 'airlock']
+            } else {
+                properties = ['release.type': 'dev', 'team': 'airlock']
+            }
+            publishPom = true // Publish generated POM files to Artifactory (true by default)
+        }
+    }
+    resolve {
+        repoKey = 'jcenter'
+    }
+}
+
+
+
